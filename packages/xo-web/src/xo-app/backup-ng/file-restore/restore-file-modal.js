@@ -10,27 +10,11 @@ import Tooltip from 'tooltip'
 import { Container, Col, Row } from 'grid'
 import { createSelector } from 'reselect'
 import { formatSize } from 'utils'
-import { FormattedDate } from 'react-intl'
 import { filter, includes, isEmpty, map } from 'lodash'
+import { getRenderXoItemOfType } from 'render-xo-item'
 import { scanDisk, scanFiles } from 'xo'
 
-const backupOptionRenderer = backup => (
-  <span>
-    <span className='tag tag-info' style={{ textTransform: 'capitalize' }}>
-      {backup.mode}
-    </span>{' '}
-    <span className='tag tag-warning'>{backup.remote.name}</span>{' '}
-    <FormattedDate
-      value={new Date(backup.timestamp)}
-      month='long'
-      day='numeric'
-      year='numeric'
-      hour='2-digit'
-      minute='2-digit'
-      second='2-digit'
-    />
-  </span>
-)
+const BACKUP_RENDERER = getRenderXoItemOfType('backup')
 
 const partitionOptionRenderer = partition => (
   <span>
@@ -257,7 +241,7 @@ export default class RestoreFileModalBody extends Component {
         <Select
           labelKey='name'
           onChange={this._onBackupChange}
-          optionRenderer={backupOptionRenderer}
+          optionRenderer={BACKUP_RENDERER}
           options={backups}
           placeholder={_('restoreFilesSelectBackup')}
           value={backup}
