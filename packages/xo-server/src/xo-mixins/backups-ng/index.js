@@ -1162,7 +1162,7 @@ export default class BackupNg {
     return backups.sort(compareTimestamp)
   }
 
-  async getAllBackupNgLogs (): Promise<ConsolidatedBackupNgLog> {
+  async getBackupNgLogs (runId?: string): Promise<ConsolidatedBackupNgLog> {
     const rawLogs = await this._app.getLog('jobs')
 
     const logs = {}
@@ -1173,7 +1173,7 @@ export default class BackupNg {
 
       switch (event) {
         case 'job.start':
-          if (data.type === 'backup') {
+          if (data.type === 'backup' && (runId === undefined || runId === id)) {
             logs[id] = {
               ...data,
               id,
