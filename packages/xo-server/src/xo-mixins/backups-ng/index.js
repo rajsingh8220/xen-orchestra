@@ -1195,7 +1195,7 @@ export default class BackupNg {
           break
         case 'task.start':
           if (logs[data.parentId] !== undefined) {
-            logs[data.taskId] = {
+            logs[id] = {
               ...data,
               start: time,
             }
@@ -1205,6 +1205,7 @@ export default class BackupNg {
           const task = logs[data.taskId]
           if (task !== undefined) {
             task.status = data.status
+            task.taskId = data.taskId
             task.result = data.result
             task.end = time
             task.duration = time - task.start
