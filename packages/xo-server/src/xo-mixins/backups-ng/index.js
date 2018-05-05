@@ -323,6 +323,70 @@ const writeStream = async (
   }
 }
 
+const wrapTask = async <T>(opts: any, task: Promise<T>): Promise<T> => {
+  const { data, logger, message, parentId } = opts
+
+  const taskId = logger.notice(message, {
+    event: 'task.start',
+    parentId,
+    data,
+  })
+
+  return task.then(
+    result => {
+      logger.notice(message, {
+        event: 'task.end',
+        result,
+        status: 'success',
+        taskId,
+      })
+      return task
+    },
+    result => {
+      logger.error(message, {
+        event: 'task.end',
+        result,
+        status: 'failure',
+        taskId,
+      })
+      return task
+    }
+  )
+}
+
+// const wrapTaskFn = <T>(
+//   opts: any,
+//   task: (...any) => Promise<T>
+// ): ((taskId: string, ...any) => Promise<T>) =>
+//   async function () {
+//     const { data, logger, message, parentId } = opts
+//
+//     const taskId = logger.notice(message, {
+//       event: 'task.start',
+//       parentId,
+//       data,
+//     })
+//
+//     try {
+//       const result = await task.apply(this, [taskId, ...arguments])
+//       logger.notice(message, {
+//         event: 'task.end',
+//         result,
+//         status: 'success',
+//         taskId,
+//       })
+//       return result
+//     } catch (result) {
+//       logger.error(message, {
+//         event: 'task.end',
+//         result,
+//         status: 'failure',
+//         taskId,
+//       })
+//       throw result
+//     }
+//   }
+
 // File structure on remotes:
 //
 // <remote>
@@ -391,15 +455,8 @@ export default class BackupNg {
         const jobId = job.id
         const scheduleId = schedule.id
         await asyncMap(vms, async vm => {
-          const { uuid } = vm
-          const method = 'backup-ng'
-          const params = {
-            id: uuid,
-            tag: job.name,
-          }
-
-          const name = vm.name_label
-          const taskId = logger.notice(
+          const { name_label: name, uuid } = vm
+          const taskId: string = logger.notice(
             `Starting backup of ${name}. (${jobId})`,
             {
               event: 'task.start',
@@ -418,33 +475,29 @@ export default class BackupNg {
               job.settings,
               'vmTimeout',
               uuid,
-              scheduleId
+              scheduleId,
+              logger,
+              taskId
             )
             if (vmTimeout !== 0) {
               p = pTimeout.call(p, vmTimeout)
             }
             await p
-            logger.notice(
-              `Backuping ${name} (${runCallId}) is a success. (${jobId})`,
-              {
-                event: 'task.end',
-                taskId,
-                status: 'success',
-              }
-            )
+            logger.notice(`Backuping ${name} is a success. (${jobId})`, {
+              event: 'task.end',
+              taskId,
+              status: 'success',
+            })
           } catch (error) {
             vmCancel.cancel()
-            logger.notice(
-              `Backuping ${name} (${runCallId}) has failed. (${jobId})`,
-              {
-                event: 'task.end',
-                taskId,
-                status: 'failure',
-                error: Array.isArray(error)
-                  ? error.map(serializeError)
-                  : serializeError(error),
-              }
-            )
+            logger.error(`Backuping ${name} has failed. (${jobId})`, {
+              event: 'task.end',
+              taskId,
+              status: 'failure',
+              error: Array.isArray(error)
+                ? error.map(serializeError)
+                : serializeError(error),
+            })
           }
         })
       }
@@ -640,7 +693,9 @@ export default class BackupNg {
     $cancelToken: any,
     vmUuid: string,
     job: BackupJob,
-    schedule: Schedule
+    schedule: Schedule,
+    logger: any,
+    taskId: string
   ): Promise<BackupResult> {
     const app = this._app
     const xapi = app.getXapi(vmUuid)
@@ -672,10 +727,21 @@ export default class BackupNg {
 
     await xapi._assertHealthyVdiChains(vm)
 
-    let snapshot: Vm = (await xapi._snapshotVm(
-      $cancelToken,
-      vm,
-      `[XO Backup ${job.name}] ${vm.name_label}`
+    let snapshot: Vm = (await wrapTask(
+      {
+        data: {
+          type: 'operation',
+          name: 'snapshot',
+        },
+        parentId: taskId,
+        logger,
+        message: `snapshoting VM ${vm.name_label}`,
+      },
+      xapi._snapshotVm(
+        $cancelToken,
+        vm,
+        `[XO Backup ${job.name}] ${vm.name_label}`
+      )
     ): any)
     await xapi._updateObjectMapProperty(snapshot, 'other_config', {
       'xo:backup:job': jobId,
@@ -762,6 +828,19 @@ export default class BackupNg {
       await waitAll(
         [
           ...remotes.map(async remoteId => {
+            // eslint-disable-next-line
+            const exportTaskId = logger.notice(
+              `exporting to remote ${remoteId}`,
+              {
+                data: {
+                  id: remoteId,
+                  type: 'remote',
+                },
+                event: 'task.start',
+                parentId: taskId,
+              }
+            )
+
             const fork = forkExport()
 
             const handler = await app.getRemoteHandler(remoteId)
@@ -1144,7 +1223,9 @@ export default class BackupNg {
     return backups.sort(compareTimestamp)
   }
 
-  async getBackupNgLogs (runId?: string): Promise<$Dict<ConsolidatedBackupNgLog>> {
+  async getBackupNgLogs (
+    runId?: string
+  ): Promise<$Dict<ConsolidatedBackupNgLog>> {
     const rawLogs = await this._app.getLogs('jobs')
 
     // FOR TEST
